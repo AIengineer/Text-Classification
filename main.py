@@ -1,3 +1,4 @@
+import os
 import warnings
 from keras.callbacks import ModelCheckpoint
 import nltk
@@ -18,6 +19,10 @@ from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 from Model.model import *
 
+os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+
+current_path = os.getcwd()
 warnings.filterwarnings('ignore')
 nltk.download('punkt')
 
@@ -45,12 +50,12 @@ CNN_BATCH_SIZE = 64
 # -----------hyper-parameters of CNN------------------------
 
 # -----------read data--------------------------------------
-Product_Behavioral_Features = pd.read_excel('../data/Resulting Features_Product_Centric_Behavioral_Features.xlsx')
-Product_Textual_Features = pd.read_excel('../data/Resulting_Features_Product_Centric_Textual_Features.xlsx')
-Review_Behavioral_Features = pd.read_excel('../data/Review_Centric_Behavioral_Features.xlsx')
-Review_Textual_Features = pd.read_excel('../data/Review_Centric_Textual_Features.xlsx')
-Reviewer_Textual_Features = pd.read_excel('../data/Reviewer_Centric_Textual_Features.xlsx')
-Reviewer_Behavioral_Features = pd.read_excel('../data/Reviewer_Centric_Behavioral_Features.xlsx')
+Product_Behavioral_Features = pd.read_excel('./data/Resulting Features_Product_Centric_Behavioral_Features.xlsx')
+Product_Textual_Features = pd.read_excel('./data/Resulting_Features_Product_Centric_Textual_Features.xlsx')
+Review_Behavioral_Features = pd.read_excel('./data/Review_Centric_Behavioral_Features.xlsx')
+Review_Textual_Features = pd.read_excel('./data/Review_Centric_Textual_Features.xlsx')
+Reviewer_Textual_Features = pd.read_excel('./data/Reviewer_Centric_Textual_Features.xlsx')
+Reviewer_Behavioral_Features = pd.read_excel('./data/Reviewer_Centric_Behavioral_Features.xlsx')
 print('Product_Behavioral_Features length : {} and it`s shape: {} \n'.format(len(Product_Behavioral_Features),
                                                                              Product_Behavioral_Features.shape))
 print('Product_Textual_Features length    : {} and it`s shape: {} \n'.format(len(Product_Textual_Features),
@@ -68,13 +73,13 @@ product_feature = Product_Behavioral_Features.join(Product_Textual_Features, how
 reviewer_feature = Reviewer_Behavioral_Features.join(Reviewer_Textual_Features, how='outer')
 review_feature = Review_Behavioral_Features.join(Review_Textual_Features, how='outer')
 
-Labels_for_products = pd.read_excel("../data/Labels_for_products.xlsx")
-Labels_for_reviewers = pd.read_excel("../data/Labels_for_reviewers.xlsx")
-Labels_for_reviews = pd.read_excel("../data/Labels_for_reviews.xlsx")
-Metadata_Sortedby_Product_wise = pd.read_excel("../data/Metadata (Sortedby_Product_wise).xlsx")
-Metadata_Sortedby_Reviewer_wise = pd.read_excel("../data/Metadata (Sortedby_Reviewer_wise).xlsx")
-ReviewContent_Sortedby_Product_wise = pd.read_excel("../data/ReviewContent (Sortedby_Product_wise).xlsx")
-ReviewContent_Sortedby_Reviewer_wise = pd.read_excel("../data/ReviewContent (Sortedby_Reviewer_wise).xlsx")
+Labels_for_products = pd.read_excel("./data/Labels_for_products.xlsx")
+Labels_for_reviewers = pd.read_excel("./data/Labels_for_reviewers.xlsx")
+Labels_for_reviews = pd.read_excel("./data/Labels_for_reviews.xlsx")
+Metadata_Sortedby_Product_wise = pd.read_excel("./data/Metadata (Sortedby_Product_wise).xlsx")
+Metadata_Sortedby_Reviewer_wise = pd.read_excel("./data/Metadata (Sortedby_Reviewer_wise).xlsx")
+ReviewContent_Sortedby_Product_wise = pd.read_excel("./data/ReviewContent (Sortedby_Product_wise).xlsx")
+ReviewContent_Sortedby_Reviewer_wise = pd.read_excel("./data/ReviewContent (Sortedby_Reviewer_wise).xlsx")
 
 print('Labels_for_products length                  : {} and it`s shape: {} \n'.format(len(Labels_for_products),
                                                                                       Labels_for_products.shape))
@@ -83,8 +88,8 @@ print('Labels_for_reviewers length                 : {} and it`s shape: {} \n'.f
 print('Labels_for_reviews length                   : {} and it`s shape: {} \n'.format(len(Labels_for_reviews),
                                                                                       Labels_for_reviews.shape))
 print(
-    'Metadata_Sortedby_Product_wise length       : {} and it`s shape: {} \n'.format(len(Metadata_Sortedby_Product_wise),
-                                                                                    Metadata_Sortedby_Product_wise.shape))
+    'Metadata_Sortedby_Product_wise length     : {} and it`s shape: {} \n'.format(len(Metadata_Sortedby_Product_wise),
+                                                                                  Metadata_Sortedby_Product_wise.shape))
 print('Metadata_Sortedby_Reviewer_wise length      : {} and it`s shape: {} \n'.format(
     len(Metadata_Sortedby_Reviewer_wise), Metadata_Sortedby_Reviewer_wise.shape))
 print('ReviewContent_Sortedby_Product_wise length  : {} and it`s shape: {} \n'.format(
@@ -125,7 +130,7 @@ reviewr_id_transform = reviewr_id_transform.rename(columns={'Reviewer_id': 'Revi
 product_id_transform = product_id_transform.rename(columns={'Product_id': 'Product_id_fromMeta_sortby_productwise'})
 
 feature_with_reviewr = pd.merge(feature_with_id, reviewr_id_transform, on=['Reviewer_id_from_Labels_for_reviews'],
-                                 how='left')
+                                how='left')
 feature_with_reviewr2 = feature_with_reviewr.add_suffix("_r")
 product_id_transform2 = product_id_transform.add_suffix("_p")
 multi_view_features = pd.merge(feature_with_reviewr2, product_id_transform2,
@@ -203,7 +208,7 @@ y_val = labels[-nb_validation_samples:]
 REG_PARAM = 1e-13
 l2_reg = regularizers.l2(12)
 
-GLOVE_DIR = "../data/glove.6B.300d.txt"
+GLOVE_DIR = "./data/glove.6B.300d.txt"
 embeddings_index = {}
 f = open(GLOVE_DIR, encoding="utf8")
 for line in f:
@@ -213,7 +218,6 @@ for line in f:
         coefs = np.asarray(values[1:], dtype='float32')
         embeddings_index[word] = coefs
     except:
-        print(word)
         pass
 f.close()
 
@@ -229,7 +233,7 @@ for word, i in word_index.items():
 
 # ----------------- emdedding layer---------------------------------------------------
 embedding_layer = Embedding(len(word_index) + 1, embed_size, weights=[embedding_matrix], input_length=max_senten_len,
-                            trainable=False)
+                            trainable=True)
 word_input = Input(shape=(max_senten_len,), dtype='float32')
 word_sequences = embedding_layer(word_input)
 word_lstm = Bidirectional(LSTM(HAN_LSTM_UNITS, return_sequences=True, kernel_regularizer=l2_reg))(word_sequences)
@@ -246,10 +250,20 @@ preds = Dense(1, activation='sigmoid')(sent_att)
 model = Model(sent_input, preds)
 optimizer = optimizers.Adam()
 model.compile(loss='binary_crossentropy', optimizer=optimizer, metrics=['acc'])
-checkpoint = ModelCheckpoint('./LSTM/best_model_LSTM.h5', verbose=0, monitor='val_loss', save_best_only=True, mode='auto')
-callback = keras.callbacks.TensorBoard(log_dir='./LSTM', histogram_freq=0, write_graph=False, write_images=False)
-history = model.fit(x_train, y_train, epochs=Epochs_HAN, batch_size=HAN_BATCH_SIZE, callbacks=[checkpoint, callback])
+checkpoint = ModelCheckpoint(os.path.join(current_path, 'LSTM', 'best_LSTM_model.h5'), verbose=0, save_weights_only=True,
+                             monitor='val_loss', save_best_only=True, mode='auto')
+callback = keras.callbacks.TensorBoard(log_dir=os.path.join(current_path, 'LSTM'),
+                                       histogram_freq=0, write_graph=False, write_images=False)
+early_stopping = keras.callbacks.EarlyStopping(
+    monitor='val_loss',
+    verbose=1,
+    patience=20,
+    mode='max',
+    restore_best_weights=True)
 
+history = model.fit(x_train, y_train, epochs=Epochs_HAN, batch_size=HAN_BATCH_SIZE, validation_split=0.2,
+                    callbacks=[checkpoint, callback, early_stopping])
+model.load_weights(os.path.join(current_path, 'LSTM', 'best_LSTM_model.h5'))
 y_pred = np.around(model.predict(x_val))
 
 print(classification_report(y_val, y_pred))
@@ -272,12 +286,6 @@ y_reviewer = Labels_for_reviewers.Label.replace(to_replace={-1: 0}).values
 X_train_reviewer, X_test_reviewer, y_train_reviewer, y_test_reviewer = train_test_split(x_reviewer, y_reviewer,
                                                                                         train_size=0.8, test_size=0.2,
                                                                                         stratify=y_reviewer)
-early_stopping = tf.keras.callbacks.EarlyStopping(
-    monitor='accuracy',
-    verbose=1,
-    patience=20,
-    mode='max',
-    restore_best_weights=True)
 
 DNNmodel = Sequential()
 DNNmodel.add(Dense(DNN_UNITS, input_dim=22, activation='relu'))
@@ -285,7 +293,12 @@ DNNmodel.add(Dense(1, activation='sigmoid'))
 optimizer = Adam(DNN_LEARNING_RATE)
 
 DNNmodel.compile(loss='binary_crossentropy', optimizer=optimizer, metrics=['accuracy'])
-DNNmodel.fit(X_train_product, y_train_product, epochs=DNN_EPOCHS, batch_size=DNN_BATCH_SIZE, callbacks=[early_stopping])
+checkpoint = ModelCheckpoint(os.path.join(current_path, 'DNN', 'best_DNN_model.h5'), verbose=0, save_weights_only=True,
+                             monitor='val_loss', save_best_only=True, mode='auto')
+callback = keras.callbacks.TensorBoard(log_dir=os.path.join(current_path, 'DNN'), histogram_freq=0, write_graph=False, write_images=False)
+DNNmodel.fit(X_train_product, y_train_product, epochs=DNN_EPOCHS, batch_size=DNN_BATCH_SIZE, validation_split=0.2,
+             callbacks=[early_stopping, callback, checkpoint])
+DNNmodel.load_weights(os.path.join(current_path, 'DNN', 'best_DNN_model.h5'))
 _, Accuracy = DNNmodel.evaluate(X_train_product, y_train_product)
 print("============== DNN ============")
 
@@ -310,9 +323,13 @@ X_test_reviewer = X_test_reviewer.reshape(len(X_test_reviewer), X_test_reviewer.
 
 optimizer = Adam(CNN_LEARNING_RATE)
 CNNmodel.compile(loss='binary_crossentropy', optimizer=optimizer, metrics=['accuracy'])
-CNNmodel.fit(X_train_reviewer, y_train_reviewer, epochs=CNN_EPOCHS, batch_size=CNN_BATCH_SIZE,
-             callbacks=[early_stopping])
-
+checkpoint = ModelCheckpoint(os.path.join(current_path, 'CNN', 'best_DNN_model.h5'), verbose=0, save_weights_only=True,
+                             monitor='val_loss', save_best_only=True, mode='auto')
+callback = keras.callbacks.TensorBoard(log_dir=os.path.join(current_path, 'CNN'),
+                                       histogram_freq=0, write_graph=False, write_images=False)
+CNNmodel.fit(X_train_reviewer, y_train_reviewer, epochs=CNN_EPOCHS, batch_size=CNN_BATCH_SIZE, validation_split=0.2,
+             callbacks=[early_stopping, callback, checkpoint])
+CNNmodel.load_weights(os.path.join(current_path, 'CNN', 'best_DNN_model.h5'))
 _, Accuracy = CNNmodel.evaluate(X_train_reviewer, y_train_reviewer)
 
 print("============== CNN ============")
