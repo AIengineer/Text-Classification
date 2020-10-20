@@ -5,7 +5,7 @@ import numpy as np
 import tensorflow as tf
 from keras import backend as K
 from sklearn.metrics import roc_auc_score
-
+from sklearn.utils import class_weight
 
 def plot_confusion_matrix(cm, classes,
                           normalize=False,
@@ -62,3 +62,35 @@ def clean_str(string):
     string = re.sub(r"\'", "", string)
     string = re.sub(r"\"", "", string)
     return string.strip().lower()
+
+
+def focal_loss(y_true, y_pred, class_weight=2, gamma=2.):
+    # Took from: https://www.dlology.com/blog/multi-class-classification-with-focal-loss-for-imbalanced-datasets/
+    class_weight_tf = tf.constant(class_weight, dtype=tf.float32)
+
+    epsilon = 1.e-9
+
+    model_out = tf.add(y_pred, epsilon)
+    ce = tf.multiply(y_true, -tf.log(model_out))
+    weight = tf.multiply(y_true, tf.pow(tf.subtract(1., model_out), gamma))
+    fl = tf.multiply(class_weight_tf, tf.multiply(weight, ce))
+    reduced_fl = tf.reduce_max(fl, axis=1)
+    loss = tf.reduce_mean(reduced_fl, axis=-1)
+    return loss
+
+
+def loss_func(class_weight):
+    def loss(y_true, y_pred):
+        return focal_loss(y_true, y_pred, class_weight)
+
+    return loss
+
+def flatten_list(l):
+    return [item for sublist in l for item in sublist]
+
+
+def compute_class_weight(class_count):
+    y = [[i] * v for i, v in enumerate(class_count)]
+    y = flatten_list(y)
+    class_weights = class_weight.compute_class_weight('balanced', np.unique(y), y)
+    return class_weights

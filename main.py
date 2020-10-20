@@ -18,7 +18,19 @@ from sklearn.metrics import confusion_matrix
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 from Model.model import *
+import argparse
+from imblearn.over_sampling import SMOTE
+import random
+from keras.models import load_model
 
+parser = argparse.ArgumentParser(
+    description='Train Mask R-CNN to detect rings and robot arms.')
+parser.add_argument("command",
+                    metavar="<command>",
+                    help="'train' or 'test'")
+args = parser.parse_args()
+
+# set gpu to run model
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
@@ -27,11 +39,11 @@ warnings.filterwarnings('ignore')
 nltk.download('punkt')
 
 # -----------hyper-parameters of HAN_LSTM-------------------
-HAN_LSTM_UNITS = 100
+HAN_LSTM_UNITS = 25
 DROP_OUT_HAN = 0.03
 HAN_LEARNING_RATE = 0.001
 Epochs_HAN = 100
-HAN_BATCH_SIZE = 64
+HAN_BATCH_SIZE = 32
 # -----------hyper-parameters of HAN_LSTM-------------------
 
 # -----------hyper-parameters of DNN------------------------
@@ -151,7 +163,7 @@ max_features = 200000
 max_senten_len = 40
 max_senten_num = 6
 embed_size = 300
-VALIDATION_SPLIT = 0.05
+VALIDATION_SPLIT = 0.1
 
 df = new_data.reset_index(drop=True)
 
@@ -202,8 +214,12 @@ nb_validation_samples = int(VALIDATION_SPLIT * data.shape[0])
 
 x_train = data[:-nb_validation_samples]
 y_train = labels[:-nb_validation_samples]
-x_val = data[-nb_validation_samples:]
-y_val = labels[-nb_validation_samples:]
+x_train, x_val, y_train, y_val = train_test_split(x_train,
+                                                  y_train,
+                                                  train_size=0.8, test_size=0.1,
+                                                  stratify=y_train)
+x_test = data[-nb_validation_samples:]
+y_test = labels[-nb_validation_samples:]
 
 REG_PARAM = 1e-13
 l2_reg = regularizers.l2(12)
@@ -231,9 +247,9 @@ for word, i in word_index.items():
     else:
         absent_words += 1
 
-# ----------------- emdedding layer---------------------------------------------------
+# -----------------embedding layer---------------------------------------------------
 embedding_layer = Embedding(len(word_index) + 1, embed_size, weights=[embedding_matrix], input_length=max_senten_len,
-                            trainable=True)
+                            trainable=False)
 word_input = Input(shape=(max_senten_len,), dtype='float32')
 word_sequences = embedding_layer(word_input)
 word_lstm = Bidirectional(LSTM(HAN_LSTM_UNITS, return_sequences=True, kernel_regularizer=l2_reg))(word_sequences)
@@ -248,27 +264,52 @@ sent_dense = TimeDistributed(Dense(4, kernel_regularizer=l2_reg))(sent_lstm)
 sent_att = Dropout(DROP_OUT_HAN)(AttentionWithContext()(sent_dense))
 preds = Dense(1, activation='sigmoid')(sent_att)
 model = Model(sent_input, preds)
-optimizer = optimizers.Adam()
-model.compile(loss='binary_crossentropy', optimizer=optimizer, metrics=['acc'])
-checkpoint = ModelCheckpoint(os.path.join(current_path, 'LSTM', 'best_LSTM_model.h5'), verbose=0, save_weights_only=True,
-                             monitor='val_loss', save_best_only=True, mode='auto')
-callback = keras.callbacks.TensorBoard(log_dir=os.path.join(current_path, 'LSTM'),
-                                       histogram_freq=0, write_graph=False, write_images=False)
-early_stopping = keras.callbacks.EarlyStopping(
-    monitor='val_loss',
-    verbose=1,
-    patience=20,
-    mode='max',
-    restore_best_weights=True)
-
-history = model.fit(x_train, y_train, epochs=Epochs_HAN, batch_size=HAN_BATCH_SIZE, validation_split=0.2,
-                    callbacks=[checkpoint, callback, early_stopping])
+lr = 0.01
+optimizer = optimizers.Adam(lr)
+model.compile(loss='binary_crossentropy', optimizer=optimizer, metrics=['accuracy'])
+if args.command == 'train':
+    checkpoint = ModelCheckpoint(os.path.join(current_path, 'LSTM', 'best_LSTM_model.h5'), verbose=0,
+                                 save_weights_only=False,
+                                 monitor='val_loss', save_best_only=True, mode='auto')
+    callback = keras.callbacks.TensorBoard(log_dir=os.path.join(current_path, 'LSTM'),
+                                           histogram_freq=0, write_graph=False, write_images=False)
+    i = 0
+    x_train_neg = x_train[y_train == 0]
+    y_train_neg = y_train[y_train == 0]
+    x_train_pos = x_train[y_train == 1]
+    y_train_pos = y_train[y_train == 1]
+    while i < len(x_train)/np.sum(y_train)*Epochs_HAN:
+        a = random.uniform(0, 1)*(len(x_train)-len(x_train_neg))
+        x_train_pos_cut = x_train_pos[int(a):int(a) + len(x_train_neg)]
+        y_train_pos_cut = y_train_pos[int(a):int(a) + len(y_train_neg)]
+        x_train_up = np.concatenate((x_train_pos_cut, x_train_neg), axis=0)
+        y_train_up = np.concatenate((y_train_pos_cut, y_train_neg), axis=0)
+        # model.compile(loss='binary_crossentropy', optimizer=optimizer, metrics=['accuracy'])
+        if i != 0:
+            model = load_model(os.path.join(current_path, 'LSTM', 'best_LSTM_model.h5'))
+        history = model.fit(x_train_up, y_train_up, epochs=Epochs_HAN, batch_size=HAN_BATCH_SIZE,
+                            validation_data=(x_val, y_val),
+                            callbacks=[checkpoint, callback])
+        i += 1
 model.load_weights(os.path.join(current_path, 'LSTM', 'best_LSTM_model.h5'))
+
+print("===========train set LSTM=================")
+target_names = ['class 0', 'class 1']
+y_pred = np.around(model.predict(x_train))
+print(classification_report(y_train, y_pred, target_names=target_names))
+cm = confusion_matrix(y_train, y_pred)
+plot_confusion_matrix(cm, classes=['0', '1'])
+
+print("===========valid set LSTM=================")
 y_pred = np.around(model.predict(x_val))
-
-print(classification_report(y_val, y_pred))
-
+print(classification_report(y_val, y_pred, target_names=target_names))
 cm = confusion_matrix(y_val, y_pred)
+plot_confusion_matrix(cm, classes=['0', '1'])
+
+print("===========test set LSTM=================")
+y_pred = np.around(model.predict(x_test))
+print(classification_report(y_test, y_pred, target_names=target_names))
+cm = confusion_matrix(y_test, y_pred)
 plot_confusion_matrix(cm, classes=['0', '1'])
 print("============== LSTM end! ============")
 
@@ -276,35 +317,72 @@ product_feature_s = product_feature.add_suffix("_p")
 x_product = product_feature_s.values
 y_product = Labels_for_products.Label.replace(to_replace={-1: 0}).values
 X_train_product, X_test_product, y_train_product, y_test_product = train_test_split(x_product, y_product,
-                                                                                    train_size=0.8, test_size=0.2,
+                                                                                    train_size=0.8, test_size=0.1,
                                                                                     stratify=y_product)
-
+X_train_product, X_val_product, y_train_product, y_val_product = train_test_split(X_train_product, y_train_product,
+                                                                                  train_size=0.8, test_size=0.1,
+                                                                                  stratify=y_train_product)
+sm = SMOTE(random_state=28, sampling_strategy=1.0)
+X_train_product_up, y_train_product_up = sm.fit_sample(X_train_product, y_train_product)
 reviewer_feature_s = reviewer_feature.add_suffix("_r")
 
 x_reviewer = reviewer_feature_s.values
 y_reviewer = Labels_for_reviewers.Label.replace(to_replace={-1: 0}).values
 X_train_reviewer, X_test_reviewer, y_train_reviewer, y_test_reviewer = train_test_split(x_reviewer, y_reviewer,
-                                                                                        train_size=0.8, test_size=0.2,
+                                                                                        train_size=0.8, test_size=0.1,
                                                                                         stratify=y_reviewer)
+X_train_reviewer, X_val_reviewer, y_train_reviewer, y_val_reviewer = train_test_split(X_train_reviewer,
+                                                                                      y_train_reviewer,
+                                                                                      train_size=0.8, test_size=0.1,
+                                                                                      stratify=y_train_reviewer)
+sm = SMOTE(random_state=29, sampling_strategy=1.0)
+X_train_reviewer_up, y_train_reviewer_up = sm.fit_sample(X_train_reviewer, y_train_reviewer)
+
+
 
 DNNmodel = Sequential()
 DNNmodel.add(Dense(DNN_UNITS, input_dim=22, activation='relu'))
 DNNmodel.add(Dense(1, activation='sigmoid'))
+
 optimizer = Adam(DNN_LEARNING_RATE)
 
 DNNmodel.compile(loss='binary_crossentropy', optimizer=optimizer, metrics=['accuracy'])
-checkpoint = ModelCheckpoint(os.path.join(current_path, 'DNN', 'best_DNN_model.h5'), verbose=0, save_weights_only=True,
-                             monitor='val_loss', save_best_only=True, mode='auto')
-callback = keras.callbacks.TensorBoard(log_dir=os.path.join(current_path, 'DNN'), histogram_freq=0, write_graph=False, write_images=False)
-DNNmodel.fit(X_train_product, y_train_product, epochs=DNN_EPOCHS, batch_size=DNN_BATCH_SIZE, validation_split=0.2,
-             callbacks=[early_stopping, callback, checkpoint])
+# DNNmodel.compile(loss=loss_func(compute_class_weight([len(y_train_product)-np.sum(y_train_product),
+#                                                       np.sum(y_train_product)])),
+#                  optimizer=optimizer, metrics=['accuracy'])
+if args.command == 'train':
+    checkpoint = ModelCheckpoint(os.path.join(current_path, 'DNN', 'best_DNN_model.h5'), verbose=0,
+                                 save_weights_only=True,
+                                 monitor='val_loss', save_best_only=True, mode='auto')
+    callback = keras.callbacks.TensorBoard(log_dir=os.path.join(current_path, 'DNN'), histogram_freq=0,
+                                           write_graph=False,
+                                           write_images=False)
+    DNNmodel.fit(X_train_product_up, y_train_product_up, epochs=DNN_EPOCHS,
+                 batch_size=DNN_BATCH_SIZE, validation_data=(X_val_product, y_val_product),
+                 callbacks=[callback, checkpoint])
 DNNmodel.load_weights(os.path.join(current_path, 'DNN', 'best_DNN_model.h5'))
-_, Accuracy = DNNmodel.evaluate(X_train_product, y_train_product)
+# _, Accuracy = DNNmodel.evaluate(X_train_product, y_train_product)
 print("============== DNN ============")
 
-print('Accuracy: %.2f' % (Accuracy * 100))
+# print('Accuracy: %.2f' % (Accuracy * 100))
 
 target_names = ['class 0', 'class 1']
+
+print("===============train set DNN================")
+y_pred = DNNmodel.predict_classes(X_train_product)
+print(classification_report(y_train_product, y_pred, target_names=target_names))
+print("accuracy = ", accuracy_score(y_train_product, y_pred))
+cm = confusion_matrix(y_train_product, y_pred)
+plot_confusion_matrix(cm, classes=['0', '1'])
+
+print("===============valid set DNN================")
+y_pred = DNNmodel.predict_classes(X_val_product)
+print(classification_report(y_val_product, y_pred, target_names=target_names))
+print("accuracy = ", accuracy_score(y_val_product, y_pred))
+cm = confusion_matrix(y_val_product, y_pred)
+plot_confusion_matrix(cm, classes=['0', '1'])
+
+print("===============test set DNN================")
 y_pred = DNNmodel.predict_classes(X_test_product)
 print(classification_report(y_test_product, y_pred, target_names=target_names))
 print("accuracy = ", accuracy_score(y_test_product, y_pred))
@@ -318,24 +396,49 @@ CNNmodel.add(Conv1D(filters=CNN_filters, kernel_size=3, activation='relu',
 CNNmodel.add(Flatten())
 CNNmodel.add(Dense(CNN_FULLY_CONNECTED_UNITS, activation='relu'))
 CNNmodel.add(Dense(1, activation='sigmoid'))
+X_train_reviewer_up = X_train_reviewer_up.reshape(len(X_train_reviewer_up), X_train_reviewer_up.shape[1], 1)
 X_train_reviewer = X_train_reviewer.reshape(len(X_train_reviewer), X_train_reviewer.shape[1], 1)
 X_test_reviewer = X_test_reviewer.reshape(len(X_test_reviewer), X_test_reviewer.shape[1], 1)
-
+X_val_reviewer = X_val_reviewer.reshape(len(X_val_reviewer), X_val_reviewer.shape[1], 1)
 optimizer = Adam(CNN_LEARNING_RATE)
 CNNmodel.compile(loss='binary_crossentropy', optimizer=optimizer, metrics=['accuracy'])
-checkpoint = ModelCheckpoint(os.path.join(current_path, 'CNN', 'best_DNN_model.h5'), verbose=0, save_weights_only=True,
-                             monitor='val_loss', save_best_only=True, mode='auto')
-callback = keras.callbacks.TensorBoard(log_dir=os.path.join(current_path, 'CNN'),
-                                       histogram_freq=0, write_graph=False, write_images=False)
-CNNmodel.fit(X_train_reviewer, y_train_reviewer, epochs=CNN_EPOCHS, batch_size=CNN_BATCH_SIZE, validation_split=0.2,
-             callbacks=[early_stopping, callback, checkpoint])
-CNNmodel.load_weights(os.path.join(current_path, 'CNN', 'best_DNN_model.h5'))
-_, Accuracy = CNNmodel.evaluate(X_train_reviewer, y_train_reviewer)
+# CNNmodel.compile(loss=loss_func(compute_class_weight([len(y_train_reviewer)-np.sum(y_train_reviewer),
+#                                                       np.sum(y_train_reviewer)])),
+#                  optimizer=optimizer, metrics=['accuracy'])
+if args.command == 'train':
+    checkpoint = ModelCheckpoint(os.path.join(current_path, 'CNN', 'best_CNN_model.h5'), verbose=0,
+                                 save_weights_only=True,
+                                 monitor='val_loss', save_best_only=True, mode='auto')
+    callback = keras.callbacks.TensorBoard(log_dir=os.path.join(current_path, 'CNN'),
+                                           histogram_freq=0, write_graph=False, write_images=False)
+    CNNmodel.fit(X_train_reviewer_up, y_train_reviewer_up, epochs=CNN_EPOCHS, batch_size=CNN_BATCH_SIZE,
+                 validation_data=(X_val_reviewer, y_val_reviewer),
+                 callbacks=[callback, checkpoint])
+CNNmodel.load_weights(os.path.join(current_path, 'CNN', 'best_CNN_model.h5'))
+# _, Accuracy = CNNmodel.evaluate(X_train_reviewer, y_train_reviewer)
 
 print("============== CNN ============")
-print('Accuracy: %.2f' % (Accuracy * 100))
+# print('Accuracy: %.2f' % (Accuracy * 100))
 
 arget_names = ['class 0', 'class 1']
+
+print("===============train set CNN=======")
+y_pred = CNNmodel.predict_classes(X_train_reviewer)
+print(classification_report(y_train_reviewer, y_pred, target_names=target_names))
+print("accuracy =", accuracy_score(y_train_reviewer, y_pred))
+
+cm = confusion_matrix(y_train_reviewer, y_pred)
+plot_confusion_matrix(cm, classes=['0', '1'])
+
+print("===============valid set CNN=======")
+y_pred = CNNmodel.predict_classes(X_val_reviewer)
+print(classification_report(y_val_reviewer, y_pred, target_names=target_names))
+print("accuracy =", accuracy_score(y_val_reviewer, y_pred))
+
+cm = confusion_matrix(y_val_reviewer, y_pred)
+plot_confusion_matrix(cm, classes=['0', '1'])
+
+print("===============test set CNN=======")
 y_pred = CNNmodel.predict_classes(X_test_reviewer)
 print(classification_report(y_test_reviewer, y_pred, target_names=target_names))
 print("accuracy =", accuracy_score(y_test_reviewer, y_pred))
@@ -360,12 +463,12 @@ def ensemble_predictions(DNNmodel, CNNmodel, HANmodel, df):
     Soft[np.flip(super_threshold_indices)] = 1
     Hard = np.around(yhats.astype(np.float32)).astype(np.float32)
     Hard = np.sum(Hard, axis=0)
-    print("Hard unique = ", set(Hard))
+    # print("Hard unique = ", set(Hard))
     # Hard = [1 if a_ > 1.5 else 0 for a_ in Hard]
     super_threshold_indices = Hard > 1.5
     Hard[super_threshold_indices] = 0
     Hard[np.flip(super_threshold_indices)] = 1
-    print("Soft unique = ", set(Soft))
+    # print("Soft unique = ", set(Soft))
     return Soft, Hard
 
 
@@ -406,8 +509,9 @@ def encode_text(encoded_text):
 
 Soft_pred, Hard_pred = ensemble_predictions(DNNmodel, CNNmodel, model, multi_view_features.iloc[:100000])
 print("===================== Voting =======================")
-print("Soft voting = ", accuracy_score(multi_view_features.Label_Labels_for_reviews_r[:100000], Soft_pred))
+print("Soft voting = ", accuracy_score(multi_view_features.Label_Labels_for_reviews_r[:100000], Soft_pred.round()))
+
 print("Hard voting = ", accuracy_score(multi_view_features.Label_Labels_for_reviews_r[:100000], Hard_pred))
 
-cm = confusion_matrix(multi_view_features.Label_Labels_for_reviews_r[:100000], Soft_pred)
+cm = confusion_matrix(multi_view_features.Label_Labels_for_reviews_r[:100000], Soft_pred.round())
 plot_confusion_matrix(cm, classes=['0', '1'])
